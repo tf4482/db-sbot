@@ -1,11 +1,20 @@
+import smtplib
 import time
 from datetime import datetime
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 import requests
 
-from config import SERVER_ID, USER_TOKEN
+from config import (
+    EMAIL_RECIPIENTS,
+    GMAIL_ADDRESS,
+    GMAIL_APP_PASSWORD,
+    SERVER_ID,
+    USER_TOKEN,
+)
 
-CHECK_INTERVAL = 5
+CHECK_INTERVAL = 60
 LOG_FILE = "channel_log.txt"
 
 HEADERS = {
@@ -32,6 +41,22 @@ def get_channels():
     else:
         print(f"Error: {response.status_code}")
         return None
+
+def send_email(subject: str, body: str, recipients: list[str]):
+    """Sends an email from the configured Gmail account to one or more recipients."""
+    msg = MIMEMultipart()
+    msg["From"] = GMAIL_ADDRESS
+    msg["To"] = ", ".join(recipients)
+    msg["Subject"] = subject
+    msg.attach(MIMEText(body, "plain"))
+
+    try:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
+            server.sendmail(GMAIL_ADDRESS, recipients, msg.as_string())
+        print(f"📧 Email sent to: {', '.join(recipients)}")
+    except Exception as e:
+        print(f"Error sending email: {e}")
 
 def log_event(event: str, channel_name: str, channel_id: str):
     """Writes a channel event to the log file."""
@@ -64,11 +89,21 @@ def main():
             if ch_id not in known_channels:
                 print(f"🆕 New channel: #{ch_name}")
                 log_event("NEW CHANNEL", ch_name, ch_id)
+                send_email(
+                    subject=f"New Discord channel detected: #{ch_name}",
+                    body=f"A new channel was created on the server.\n\nName: #{ch_name}\nID: {ch_id}",
+                    recipients=EMAIL_RECIPIENTS,
+                )
 
         for ch_id, ch_name in known_channels.items():
             if ch_id not in current_channels:
                 print(f"🗑️ Channel deleted: #{ch_name}")
                 log_event("CHANNEL DELETED", ch_name, ch_id)
+                send_email(
+                    subject=f"Discord channel deleted: #{ch_name}",
+                    body=f"A channel was deleted from the server.\n\nName: #{ch_name}\nID: {ch_id}",
+                    recipients=EMAIL_RECIPIENTS,
+                )
 
         known_channels = current_channels
 
