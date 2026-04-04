@@ -10,7 +10,7 @@ wheels/
 .venv
 
 # Credentials
-config.py
+config.json
 
 # Log
 channel_log.txt
