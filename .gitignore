@@ -11,3 +11,6 @@ wheels/
 
 # Credentials
 config.py
+
+# Log
+channel_log.txt
