@@ -1,18 +1,21 @@
+import json
 import smtplib
 import time
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from pathlib import Path
 
 import requests
 
-from config import (
-    EMAIL_RECIPIENTS,
-    GMAIL_ADDRESS,
-    GMAIL_APP_PASSWORD,
-    SERVER_ID,
-    USER_TOKEN,
-)
+with open(Path(__file__).parent / "config.json", encoding="utf-8") as _f:
+    _cfg = json.load(_f)
+
+USER_TOKEN         = _cfg["USER_TOKEN"]
+SERVER_ID          = _cfg["SERVER_ID"]
+GMAIL_ADDRESS      = _cfg["GMAIL_ADDRESS"]
+GMAIL_APP_PASSWORD = _cfg["GMAIL_APP_PASSWORD"]
+EMAIL_RECIPIENTS   = _cfg["EMAIL_RECIPIENTS"]
 
 CHECK_INTERVAL = 60
 LOG_FILE = "channel_log.txt"
