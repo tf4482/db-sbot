@@ -1,6 +1,76 @@
-def main():
-    print("Hello from db-sbot!")
+import time
+from datetime import datetime
 
+import requests
+
+from config import SERVER_ID, USER_TOKEN
+
+CHECK_INTERVAL = 5
+LOG_FILE = "channel_log.txt"
+
+HEADERS = {
+    "Authorization": USER_TOKEN,
+    "Content-Type": "application/json"
+}
+
+def get_server_name():
+    """Fetches the name of the server."""
+    url = f"https://discord.com/api/v10/guilds/{SERVER_ID}"
+    response = requests.get(url, headers=HEADERS)
+    if response.status_code == 200:
+        return response.json()["name"]
+    else:
+        print(f"Error fetching server name: {response.status_code}")
+        return SERVER_ID
+
+def get_channels():
+    """Fetches all channels of the server."""
+    url = f"https://discord.com/api/v10/guilds/{SERVER_ID}/channels"
+    response = requests.get(url, headers=HEADERS)
+    if response.status_code == 200:
+        return {ch["id"]: ch["name"] for ch in response.json()}
+    else:
+        print(f"Error: {response.status_code}")
+        return None
+
+def log_event(event: str, channel_name: str, channel_id: str):
+    """Writes a channel event to the log file."""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    line = f"[{timestamp}] {event}: #{channel_name} (ID: {channel_id})\n"
+    with open(LOG_FILE, "a", encoding="utf-8") as f:
+        f.write(line)
+
+def main():
+    server_name = get_server_name()
+    print(f"🔍 Monitoring started on server: {server_name}")
+
+    known_channels = get_channels()
+
+    if known_channels is None:
+        print("Could not load channels. Aborting.")
+        return
+
+    print(f"✅ {len(known_channels)} channels found. Monitoring...")
+
+    while True:
+        time.sleep(CHECK_INTERVAL)
+
+        current_channels = get_channels()
+
+        if current_channels is None:
+            continue
+
+        for ch_id, ch_name in current_channels.items():
+            if ch_id not in known_channels:
+                print(f"🆕 New channel: #{ch_name}")
+                log_event("NEW CHANNEL", ch_name, ch_id)
+
+        for ch_id, ch_name in known_channels.items():
+            if ch_id not in current_channels:
+                print(f"🗑️ Channel deleted: #{ch_name}")
+                log_event("CHANNEL DELETED", ch_name, ch_id)
+
+        known_channels = current_channels
 
 if __name__ == "__main__":
     main()
