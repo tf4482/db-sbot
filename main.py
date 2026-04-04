@@ -8,7 +8,11 @@ from pathlib import Path
 
 import requests
 
-with open(Path(__file__).parent / "config.json", encoding="utf-8") as _f:
+_local_cfg  = Path(__file__).parent / "db-sbot-config.json"
+_system_cfg = Path("/etc/db-sbot-config.json")
+_cfg_path   = _local_cfg if _local_cfg.exists() else _system_cfg
+
+with open(_cfg_path, encoding="utf-8") as _f:
     _cfg = json.load(_f)
 
 USER_TOKEN         = _cfg["USER_TOKEN"]
@@ -16,6 +20,7 @@ SERVER_ID          = _cfg["SERVER_ID"]
 GMAIL_ADDRESS      = _cfg["GMAIL_ADDRESS"]
 GMAIL_APP_PASSWORD = _cfg["GMAIL_APP_PASSWORD"]
 EMAIL_RECIPIENTS   = _cfg["EMAIL_RECIPIENTS"]
+LOGGING_ENABLED    = _cfg.get("LOGGING_ENABLED", True)
 
 CHECK_INTERVAL = 60
 LOG_FILE = "channel_log.txt"
@@ -91,7 +96,8 @@ def main():
         for ch_id, ch_name in current_channels.items():
             if ch_id not in known_channels:
                 print(f"🆕 New channel: #{ch_name}")
-                log_event("NEW CHANNEL", ch_name, ch_id)
+                if LOGGING_ENABLED:
+                    log_event("NEW CHANNEL", ch_name, ch_id)
                 send_email(
                     subject=f"New Discord channel detected: #{ch_name}",
                     body=f"A new channel was created on the server.\n\nName: #{ch_name}\nID: {ch_id}",
@@ -101,7 +107,8 @@ def main():
         for ch_id, ch_name in known_channels.items():
             if ch_id not in current_channels:
                 print(f"🗑️ Channel deleted: #{ch_name}")
-                log_event("CHANNEL DELETED", ch_name, ch_id)
+                if LOGGING_ENABLED:
+                    log_event("CHANNEL DELETED", ch_name, ch_id)
                 send_email(
                     subject=f"Discord channel deleted: #{ch_name}",
                     body=f"A channel was deleted from the server.\n\nName: #{ch_name}\nID: {ch_id}",
