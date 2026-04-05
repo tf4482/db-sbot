@@ -19,10 +19,17 @@ with open(_cfg_path, encoding="utf-8") as _f:
 
 USER_TOKEN         = _cfg["USER_TOKEN"]
 SERVER_ID          = _cfg["SERVER_ID"]
-GMAIL_ADDRESS      = _cfg["GMAIL_ADDRESS"]
-GMAIL_APP_PASSWORD = _cfg["GMAIL_APP_PASSWORD"]
-EMAIL_RECIPIENTS   = _cfg["EMAIL_RECIPIENTS"]
 LOGGING_ENABLED    = _cfg.get("LOGGING_ENABLED", True)
+
+# Email notification settings
+EMAIL_ENABLED      = _cfg.get("EMAIL_ENABLED", True)
+GMAIL_ADDRESS      = _cfg.get("GMAIL_ADDRESS", "")
+GMAIL_APP_PASSWORD = _cfg.get("GMAIL_APP_PASSWORD", "")
+EMAIL_RECIPIENTS   = _cfg.get("EMAIL_RECIPIENTS", [])
+
+# Discord webhook notification settings
+DISCORD_WEBHOOK_ENABLED = _cfg.get("DISCORD_WEBHOOK_ENABLED", False)
+DISCORD_WEBHOOK_URL     = _cfg.get("DISCORD_WEBHOOK_URL", "")
 
 CHECK_INTERVAL = 60
 LOG_FILE = "channel_log.txt"
@@ -68,6 +75,34 @@ def send_email(subject: str, body: str, recipients: list[str]):
     except Exception as e:
         print(f"Error sending email: {e}")
 
+def send_discord_webhook(title: str, description: str, color: int):
+    """Sends a Discord embed notification via a configured webhook URL."""
+    payload = {
+        "embeds": [
+            {
+                "title": title,
+                "description": description,
+                "color": color,
+                "timestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            }
+        ]
+    }
+    try:
+        response = requests.post(DISCORD_WEBHOOK_URL, json=payload)
+        if response.status_code in (200, 204):
+            print("🔔 Discord webhook notification sent.")
+        else:
+            print(f"Error sending Discord webhook: {response.status_code} – {response.text}")
+    except Exception as e:
+        print(f"Error sending Discord webhook: {e}")
+
+def notify(subject: str, body: str, title: str, color: int):
+    """Dispatches notifications to all enabled channels (email, Discord webhook)."""
+    if EMAIL_ENABLED and EMAIL_RECIPIENTS:
+        send_email(subject=subject, body=body, recipients=EMAIL_RECIPIENTS)
+    if DISCORD_WEBHOOK_ENABLED and DISCORD_WEBHOOK_URL:
+        send_discord_webhook(title=title, description=body, color=color)
+
 def log_event(event: str, channel_name: str, channel_id: str):
     """Writes a channel event to the log file."""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -100,10 +135,11 @@ def main():
                 print(f"🆕 New channel: #{ch_name}")
                 if LOGGING_ENABLED:
                     log_event("NEW CHANNEL", ch_name, ch_id)
-                send_email(
+                notify(
                     subject=f"New Discord channel detected: #{ch_name}",
                     body=f"A new channel was created on the server.\n\nName: #{ch_name}\nID: {ch_id}",
-                    recipients=EMAIL_RECIPIENTS,
+                    title=f"🆕 New channel: #{ch_name}",
+                    color=0x57F287,  # green
                 )
 
         for ch_id, ch_name in known_channels.items():
@@ -111,10 +147,11 @@ def main():
                 print(f"🗑️ Channel deleted: #{ch_name}")
                 if LOGGING_ENABLED:
                     log_event("CHANNEL DELETED", ch_name, ch_id)
-                send_email(
+                notify(
                     subject=f"Discord channel deleted: #{ch_name}",
                     body=f"A channel was deleted from the server.\n\nName: #{ch_name}\nID: {ch_id}",
-                    recipients=EMAIL_RECIPIENTS,
+                    title=f"🗑️ Channel deleted: #{ch_name}",
+                    color=0xED4245,  # red
                 )
 
         known_channels = current_channels
