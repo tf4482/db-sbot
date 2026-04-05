@@ -2,7 +2,7 @@
 
 import json
 import smtplib
-import time
+import sqlite3
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -10,9 +10,31 @@ from pathlib import Path
 
 import requests
 
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+
 _local_cfg  = Path(__file__).parent / "db-sbot-config.json"
-_system_cfg = Path("/etc/db-sbot-config.json")
-_cfg_path   = _local_cfg if _local_cfg.exists() else _system_cfg
+_user_cfg   = Path.home() / ".config" / "db-sbot" / "db-sbot-config.json"
+_cfg_path   = next((p for p in (_local_cfg, _user_cfg) if p.exists()), None)
+
+if _cfg_path is None:
+    _user_cfg.parent.mkdir(parents=True, exist_ok=True)
+    _placeholder = {
+        "USER_TOKEN":              "your-discord-user-token-here",
+        "SERVER_ID":               "your-server-id-here",
+        "LOGGING_ENABLED":         True,
+        "EMAIL_ENABLED":           False,
+        "GMAIL_ADDRESS":           "your-gmail@gmail.com",
+        "GMAIL_APP_PASSWORD":      "your-gmail-app-password",
+        "EMAIL_RECIPIENTS":        [],
+        "DISCORD_WEBHOOK_ENABLED": False,
+        "DISCORD_WEBHOOK_URL":     "your-discord-webhook-url-here",
+    }
+    with open(_user_cfg, "w", encoding="utf-8") as _f:
+        json.dump(_placeholder, _f, indent=4)
+    print(f"⚙️  No config file found. A placeholder has been created at:\n   {_user_cfg}\nPlease fill it in and restart the script.")
+    raise SystemExit(1)
 
 with open(_cfg_path, encoding="utf-8") as _f:
     _cfg = json.load(_f)
@@ -31,35 +53,81 @@ EMAIL_RECIPIENTS   = _cfg.get("EMAIL_RECIPIENTS", [])
 DISCORD_WEBHOOK_ENABLED = _cfg.get("DISCORD_WEBHOOK_ENABLED", False)
 DISCORD_WEBHOOK_URL     = _cfg.get("DISCORD_WEBHOOK_URL", "")
 
-CHECK_INTERVAL = 60
-LOG_FILE = "channel_log.txt"
+# ---------------------------------------------------------------------------
+# Persistent state — SQLite in ~/.db-sbot/
+# ---------------------------------------------------------------------------
+
+DATA_DIR = Path.home() / ".db-sbot"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+DB_PATH  = DATA_DIR / "state.db"
+LOG_FILE = DATA_DIR / "channel_log.txt"
 
 HEADERS = {
     "Authorization": USER_TOKEN,
     "Content-Type": "application/json"
 }
 
-def get_server_name():
+# ---------------------------------------------------------------------------
+# Database helpers
+# ---------------------------------------------------------------------------
+
+def init_db(conn: sqlite3.Connection) -> None:
+    """Create the schema if it doesn't exist yet."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS channels (
+            id   TEXT PRIMARY KEY,
+            name TEXT NOT NULL
+        )
+        """
+    )
+    conn.commit()
+
+
+def load_known_channels(conn: sqlite3.Connection) -> dict[str, str]:
+    """Return {id: name} for every channel stored in the DB."""
+    rows = conn.execute("SELECT id, name FROM channels").fetchall()
+    return {row[0]: row[1] for row in rows}
+
+
+def save_channels(conn: sqlite3.Connection, channels: dict[str, str]) -> None:
+    """Replace the stored channel list with the current snapshot."""
+    conn.execute("DELETE FROM channels")
+    conn.executemany(
+        "INSERT INTO channels (id, name) VALUES (?, ?)",
+        channels.items(),
+    )
+    conn.commit()
+
+# ---------------------------------------------------------------------------
+# Discord API
+# ---------------------------------------------------------------------------
+
+def get_server_name() -> str:
     """Fetches the name of the server."""
     url = f"https://discord.com/api/v10/guilds/{SERVER_ID}"
     response = requests.get(url, headers=HEADERS)
     if response.status_code == 200:
         return response.json()["name"]
-    else:
-        print(f"Error fetching server name: {response.status_code}")
-        return SERVER_ID
+    print(f"Error fetching server name: {response.status_code}")
+    return SERVER_ID
 
-def get_channels():
+
+def get_channels() -> dict[str, str] | None:
     """Fetches all channels of the server."""
     url = f"https://discord.com/api/v10/guilds/{SERVER_ID}/channels"
     response = requests.get(url, headers=HEADERS)
     if response.status_code == 200:
         return {ch["id"]: ch["name"] for ch in response.json()}
-    else:
-        print(f"Error: {response.status_code}")
-        return None
+    print(f"Error: {response.status_code}")
+    return None
 
-def send_email(subject: str, body: str, recipients: list[str]):
+# ---------------------------------------------------------------------------
+# Notifications
+# ---------------------------------------------------------------------------
+
+def send_email(subject: str, body: str, recipients: list[str]) -> None:
     """Sends an email from the configured Gmail account to one or more recipients."""
     msg = MIMEMultipart()
     msg["From"] = GMAIL_ADDRESS
@@ -75,7 +143,8 @@ def send_email(subject: str, body: str, recipients: list[str]):
     except Exception as e:
         print(f"Error sending email: {e}")
 
-def send_discord_webhook(title: str, description: str, color: int):
+
+def send_discord_webhook(title: str, description: str, color: int) -> None:
     """Sends a Discord embed notification via a configured webhook URL."""
     payload = {
         "embeds": [
@@ -96,40 +165,52 @@ def send_discord_webhook(title: str, description: str, color: int):
     except Exception as e:
         print(f"Error sending Discord webhook: {e}")
 
-def notify(subject: str, body: str, title: str, color: int):
+
+def notify(subject: str, body: str, title: str, color: int) -> None:
     """Dispatches notifications to all enabled channels (email, Discord webhook)."""
     if EMAIL_ENABLED and EMAIL_RECIPIENTS:
         send_email(subject=subject, body=body, recipients=EMAIL_RECIPIENTS)
     if DISCORD_WEBHOOK_ENABLED and DISCORD_WEBHOOK_URL:
         send_discord_webhook(title=title, description=body, color=color)
 
-def log_event(event: str, channel_name: str, channel_id: str):
-    """Writes a channel event to the log file."""
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+
+def log_event(event: str, channel_name: str, channel_id: str) -> None:
+    """Appends a channel event to the log file."""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{timestamp}] {event}: #{channel_name} (ID: {channel_id})\n"
     with open(LOG_FILE, "a", encoding="utf-8") as f:
         f.write(line)
 
-def main():
+# ---------------------------------------------------------------------------
+# Main — single-shot execution
+# ---------------------------------------------------------------------------
+
+def main() -> None:
     server_name = get_server_name()
-    print(f"🔍 Monitoring started on server: {server_name}")
+    print(f"🔍 Checking server: {server_name}")
 
-    known_channels = get_channels()
+    current_channels = get_channels()
+    if current_channels is None:
+        print("Could not fetch channels. Aborting.")
+        raise SystemExit(1)
 
-    if known_channels is None:
-        print("Could not load channels. Aborting.")
-        return
+    with sqlite3.connect(DB_PATH) as conn:
+        init_db(conn)
+        known_channels = load_known_channels(conn)
 
-    print(f"✅ {len(known_channels)} channels found. Monitoring...")
+        if not known_channels:
+            # First run — seed the database and exit
+            save_channels(conn, current_channels)
+            print(
+                f"✅ First run: {len(current_channels)} channels stored in {DB_PATH}.\n"
+                "Run the script again (e.g. via cron) to detect changes."
+            )
+            return
 
-    while True:
-        time.sleep(CHECK_INTERVAL)
-
-        current_channels = get_channels()
-
-        if current_channels is None:
-            continue
-
+        # Detect new channels
         for ch_id, ch_name in current_channels.items():
             if ch_id not in known_channels:
                 print(f"🆕 New channel: #{ch_name}")
@@ -142,6 +223,7 @@ def main():
                     color=0x57F287,  # green
                 )
 
+        # Detect deleted channels
         for ch_id, ch_name in known_channels.items():
             if ch_id not in current_channels:
                 print(f"🗑️ Channel deleted: #{ch_name}")
@@ -154,7 +236,10 @@ def main():
                     color=0xED4245,  # red
                 )
 
-        known_channels = current_channels
+        # Persist the latest snapshot
+        save_channels(conn, current_channels)
+        print("✅ Done.")
+
 
 if __name__ == "__main__":
     main()
