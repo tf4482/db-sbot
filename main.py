@@ -21,15 +21,17 @@ _cfg_path   = next((p for p in (_local_cfg, _user_cfg) if p.exists()), None)
 if _cfg_path is None:
     _user_cfg.parent.mkdir(parents=True, exist_ok=True)
     _placeholder = {
-        "USER_TOKEN":              "your-discord-user-token-here",
-        "SERVER_ID":               "your-server-id-here",
-        "LOGGING_ENABLED":         True,
-        "EMAIL_ENABLED":           False,
-        "GMAIL_ADDRESS":           "your-gmail@gmail.com",
-        "GMAIL_APP_PASSWORD":      "your-gmail-app-password",
-        "EMAIL_RECIPIENTS":        [],
-        "DISCORD_WEBHOOK_ENABLED": False,
-        "DISCORD_WEBHOOK_URL":     "your-discord-webhook-url-here",
+        "USER_TOKEN":                "your-discord-user-token-here",
+        "SERVER_ID":                 "your-server-id-here",
+        "LOGGING_ENABLED":           True,
+        "DETECT_NEW_CHANNELS":       True,
+        "DETECT_REMOVED_CHANNELS":   True,
+        "EMAIL_ENABLED":             False,
+        "GMAIL_ADDRESS":             "your-gmail@gmail.com",
+        "GMAIL_APP_PASSWORD":        "your-gmail-app-password",
+        "EMAIL_RECIPIENTS":          [],
+        "DISCORD_WEBHOOK_ENABLED":   False,
+        "DISCORD_WEBHOOK_URL":       "your-discord-webhook-url-here",
     }
     with open(_user_cfg, "w", encoding="utf-8") as _f:
         json.dump(_placeholder, _f, indent=4)
@@ -41,7 +43,9 @@ with open(_cfg_path, encoding="utf-8") as _f:
 
 USER_TOKEN         = _cfg["USER_TOKEN"]
 SERVER_ID          = _cfg["SERVER_ID"]
-LOGGING_ENABLED    = _cfg.get("LOGGING_ENABLED", True)
+LOGGING_ENABLED          = _cfg.get("LOGGING_ENABLED", True)
+DETECT_NEW_CHANNELS      = _cfg.get("DETECT_NEW_CHANNELS", True)
+DETECT_REMOVED_CHANNELS  = _cfg.get("DETECT_REMOVED_CHANNELS", True)
 
 # Email notification settings
 EMAIL_ENABLED      = _cfg.get("EMAIL_ENABLED", True)
@@ -211,30 +215,32 @@ def main() -> None:
             return
 
         # Detect new channels
-        for ch_id, ch_name in current_channels.items():
-            if ch_id not in known_channels:
-                print(f"🆕 New channel: #{ch_name}")
-                if LOGGING_ENABLED:
-                    log_event("NEW CHANNEL", ch_name, ch_id)
-                notify(
-                    subject=f"New Discord channel detected: #{ch_name}",
-                    body=f"A new channel was created on the server.\n\nName: #{ch_name}\nID: {ch_id}",
-                    title=f"🆕 New channel: #{ch_name}",
-                    color=0x57F287,  # green
-                )
+        if DETECT_NEW_CHANNELS:
+            for ch_id, ch_name in current_channels.items():
+                if ch_id not in known_channels:
+                    print(f"🆕 New channel: #{ch_name}")
+                    if LOGGING_ENABLED:
+                        log_event("NEW CHANNEL", ch_name, ch_id)
+                    notify(
+                        subject=f"New Discord channel detected: #{ch_name}",
+                        body=f"A new channel was created on the server.\n\nName: #{ch_name}\nID: {ch_id}",
+                        title=f"🆕 New channel: #{ch_name}",
+                        color=0x57F287,  # green
+                    )
 
         # Detect deleted channels
-        for ch_id, ch_name in known_channels.items():
-            if ch_id not in current_channels:
-                print(f"🗑️ Channel deleted: #{ch_name}")
-                if LOGGING_ENABLED:
-                    log_event("CHANNEL DELETED", ch_name, ch_id)
-                notify(
-                    subject=f"Discord channel deleted: #{ch_name}",
-                    body=f"A channel was deleted from the server.\n\nName: #{ch_name}\nID: {ch_id}",
-                    title=f"🗑️ Channel deleted: #{ch_name}",
-                    color=0xED4245,  # red
-                )
+        if DETECT_REMOVED_CHANNELS:
+            for ch_id, ch_name in known_channels.items():
+                if ch_id not in current_channels:
+                    print(f"🗑️ Channel deleted: #{ch_name}")
+                    if LOGGING_ENABLED:
+                        log_event("CHANNEL DELETED", ch_name, ch_id)
+                    notify(
+                        subject=f"Discord channel deleted: #{ch_name}",
+                        body=f"A channel was deleted from the server.\n\nName: #{ch_name}\nID: {ch_id}",
+                        title=f"🗑️ Channel deleted: #{ch_name}",
+                        color=0xED4245,  # red
+                    )
 
         # Persist the latest snapshot
         save_channels(conn, current_channels)

@@ -16,3 +16,4 @@ db-sbot-config.json
 channel_log.txt
 
 *.old
+*.spec
