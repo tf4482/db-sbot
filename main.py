@@ -11,8 +11,26 @@ from pathlib import Path
 import requests
 
 _local_cfg  = Path(__file__).parent / "db-sbot-config.json"
-_system_cfg = Path("/etc/db-sbot-config.json")
-_cfg_path   = _local_cfg if _local_cfg.exists() else _system_cfg
+_user_cfg   = Path.home() / ".config" / "db-sbot" / "db-sbot-config.json"
+_cfg_path   = next((p for p in (_local_cfg, _user_cfg) if p.exists()), None)
+
+if _cfg_path is None:
+    _user_cfg.parent.mkdir(parents=True, exist_ok=True)
+    _placeholder = {
+        "USER_TOKEN":              "your-discord-user-token-here",
+        "SERVER_ID":               "your-server-id-here",
+        "LOGGING_ENABLED":         True,
+        "EMAIL_ENABLED":           False,
+        "GMAIL_ADDRESS":           "your-gmail@gmail.com",
+        "GMAIL_APP_PASSWORD":      "your-gmail-app-password",
+        "EMAIL_RECIPIENTS":        [],
+        "DISCORD_WEBHOOK_ENABLED": False,
+        "DISCORD_WEBHOOK_URL":     "your-discord-webhook-url-here",
+    }
+    with open(_user_cfg, "w", encoding="utf-8") as _f:
+        json.dump(_placeholder, _f, indent=4)
+    print(f"⚙️  No config file found. A placeholder has been created at:\n   {_user_cfg}\nPlease fill it in and restart the script.")
+    raise SystemExit(1)
 
 with open(_cfg_path, encoding="utf-8") as _f:
     _cfg = json.load(_f)
