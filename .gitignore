@@ -10,7 +10,10 @@ wheels/
 .venv
 
 # Credentials
-config.py
+db-sbot-config.json
 
 # Log
 channel_log.txt
+
+*.old
+*.spec
