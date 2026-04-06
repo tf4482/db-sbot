@@ -2,7 +2,7 @@
 
 A lightweight, **single-shot** Python script that detects when channels are **created** or **deleted** on a Discord server and sends notifications via **e-mail** and/or a **Discord webhook**.
 
-Run it on a schedule (e.g. via `cron`) instead of keeping a long-running process alive.
+Run it on a schedule (e.g. via `cron` or a systemd timer) instead of keeping a long-running process alive.
 
 ---
 
@@ -11,10 +11,11 @@ Run it on a schedule (e.g. via `cron`) instead of keeping a long-running process
 - 🆕 Detects **new** channels
 - 🗑️ Detects **deleted** channels
 - 📧 Sends **e-mail** notifications via Gmail
-- 🔔 Sends **Discord webhook** embed notifications
+- 🔔 Sends **Discord webhook** embed notifications (optionally pings a role)
 - 📝 Writes events to a **log file**
 - ⚙️ Self-bootstrapping — creates a placeholder config on first run
-- 💾 Persists state between runs in a local **SQLite** database (`~/.db-sbot/state.db`)
+- 💾 Persists state between runs in a local **SQLite** database
+- 🐛 **Debug mode** — separate config file and database for testing
 
 ---
 
@@ -45,12 +46,14 @@ pip install requests
 
 ---
 
-## ▶️ First run
+## ▶️ Usage
 
 ```bash
-uv run main.py
-# or
+uv run main.py          # normal mode
+uv run main.py --debug  # debug mode  (short: -d)
+
 python main.py
+python main.py --debug
 ```
 
 On the very **first run**, if no config file is found the script will:
@@ -61,7 +64,7 @@ On the very **first run**, if no config file is found the script will:
 
 Fill in the config file (see [Configuration](#%EF%B8%8F-configuration) below), then run the script again.
 
-The **second first run** (with a valid config) will seed the database with the current channel list and exit — no notifications are sent yet.
+The **second run** (with a valid config) seeds the database with the current channel list and exits — no notifications are sent yet.
 
 From the **third run onwards** the script compares the current channel list with the stored snapshot, sends notifications for any changes, updates the snapshot, and exits.
 
@@ -95,9 +98,24 @@ The file is plain **JSON**. All keys and their defaults:
 
     // 🔔 Discord webhook notifications
     "DISCORD_WEBHOOK_ENABLED": false,
-    "DISCORD_WEBHOOK_URL":     "your-discord-webhook-url-here"
+    "DISCORD_WEBHOOK_URL":     "your-discord-webhook-url-here",
+    "DISCORD_WEBHOOK_ROLE_ID": ""      // optional: role ID to ping (leave empty to disable)
 }
 ```
+
+### 🐛 Debug mode configuration
+
+When `--debug` / `-d` is passed, the script uses a **separate** config file and database so normal production state is never touched:
+
+| | Normal | Debug |
+|---|---|---|
+| Config | `db-sbot-config.json` | `db-sbot-config.debug.json` |
+| Database | `~/.db-sbot/state.db` | `~/.db-sbot/state.debug.db` |
+| Log | `~/.db-sbot/channel_log.txt` | `~/.db-sbot/channel_log.debug.txt` |
+
+If the debug config is missing it is auto-created as a placeholder at `~/.config/db-sbot/db-sbot-config.debug.json`, identical to the normal first-run behaviour.
+
+---
 
 ### 🔑 How to get your Discord User Token
 
@@ -117,7 +135,21 @@ The file is plain **JSON**. All keys and their defaults:
 3. Right-click the **server icon** in the left sidebar
 4. Click **Copy Server ID**
 
-Paste the copied ID as the `SERVER_ID` value in your config.
+### 🔔 Discord Webhook URL
+
+1. Open the Discord server where you want to receive notifications
+2. Go to **Server Settings → Integrations → Webhooks**
+3. Click **New Webhook**, choose a channel, and copy the URL
+4. Paste it as `DISCORD_WEBHOOK_URL` in your config
+
+### 🏷️ Discord Role ID (optional ping)
+
+1. Enable **Developer Mode** (Settings → Advanced)
+2. Right-click the role in **Server Settings → Roles**
+3. Click **Copy Role ID**
+4. Paste it as `DISCORD_WEBHOOK_ROLE_ID` in your config
+
+Leave the value empty (`""`) to send embed-only notifications without any ping.
 
 ### 📧 Gmail App Password
 
@@ -127,13 +159,6 @@ Google requires an **App Password** when using 2-Step Verification (which is rec
 2. Select **Mail** as the app and your device
 3. Click **Generate** and copy the 16-character password
 4. Paste it as `GMAIL_APP_PASSWORD` in your config
-
-### 🔔 Discord Webhook URL
-
-1. Open the Discord server where you want to receive notifications
-2. Go to **Server Settings → Integrations → Webhooks**
-3. Click **New Webhook**, choose a channel, and copy the URL
-4. Paste it as `DISCORD_WEBHOOK_URL` in your config
 
 ---
 
@@ -153,7 +178,7 @@ If you're using `uv`:
 
 ---
 
-## ⚙️ Scheduling with systemd (alternative to cron)
+## 🔧 Scheduling with systemd (alternative to cron)
 
 systemd timers are the modern alternative to cron. You need **two files**: a `.service` unit that runs the script once and a `.timer` unit that triggers it on a schedule.
 
@@ -257,9 +282,12 @@ db-sbot
 
 | Path | Purpose |
 |------|---------|
-| `~/.config/db-sbot/db-sbot-config.json` | Configuration file (auto-created on first run) |
+| `~/.config/db-sbot/db-sbot-config.json` | Config file (auto-created on first run) |
+| `~/.config/db-sbot/db-sbot-config.debug.json` | Debug config file (auto-created on first `--debug` run) |
 | `~/.db-sbot/state.db` | SQLite database — stores the last known channel list |
+| `~/.db-sbot/state.debug.db` | SQLite database for debug mode |
 | `~/.db-sbot/channel_log.txt` | Event log (new / deleted channels with timestamps) |
+| `~/.db-sbot/channel_log.debug.txt` | Event log for debug mode |
 
 ---
 
