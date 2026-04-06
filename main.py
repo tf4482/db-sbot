@@ -173,7 +173,7 @@ def send_discord_webhook(title: str, description: str, color: int, role_id: str 
                 "title": title,
                 "description": description,
                 "color": color,
-                "timestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "timestamp": datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
             }
         ]
     }
