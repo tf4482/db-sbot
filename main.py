@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import argparse
 import smtplib
 import sqlite3
 from datetime import datetime
@@ -10,6 +11,19 @@ from pathlib import Path
 import requests
 
 from utils_python.config_loader import load_config
+
+# ---------------------------------------------------------------------------
+# CLI arguments — parsed first so DEBUG is available for everything below
+# ---------------------------------------------------------------------------
+
+_parser = argparse.ArgumentParser(description="Discord server channel monitor bot")
+_parser.add_argument(
+    "-d", "--debug",
+    action="store_true",
+    help="Run in debug mode (uses a separate config file and database)",
+)
+_args = _parser.parse_args()
+DEBUG: bool = _args.debug
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -30,9 +44,11 @@ _CFG_DEFAULTS = {
     "DISCORD_WEBHOOK_ROLE_ID":   "",
 }
 
+_config_filename = "db-sbot-config.debug.json" if DEBUG else "db-sbot-config.json"
+
 _cfg = load_config(
     app_name="db-sbot",
-    config_filename="db-sbot-config.json",
+    config_filename=_config_filename,
     defaults=_CFG_DEFAULTS,
     caller_file=__file__,
 )
@@ -61,8 +77,8 @@ DISCORD_WEBHOOK_ROLE_ID = _cfg.get("DISCORD_WEBHOOK_ROLE_ID", "")
 DATA_DIR = Path.home() / ".db-sbot"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-DB_PATH  = DATA_DIR / "state.db"
-LOG_FILE = DATA_DIR / "channel_log.txt"
+DB_PATH  = DATA_DIR / ("state.debug.db"        if DEBUG else "state.db")
+LOG_FILE = DATA_DIR / ("channel_log.debug.txt" if DEBUG else "channel_log.txt")
 
 HEADERS = {
     "Authorization": USER_TOKEN,
@@ -196,6 +212,14 @@ def log_event(event: str, channel_name: str, channel_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    if DEBUG:
+        print(
+            "⚠️  DEBUG MODE\n"
+            f"   Config : {_config_filename}\n"
+            f"   DB     : {DB_PATH}\n"
+            f"   Log    : {LOG_FILE}\n"
+        )
+
     server_name = get_server_name()
     print(f"🔍 Checking server: {server_name}")
 
