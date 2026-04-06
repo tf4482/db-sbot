@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-import json
 import smtplib
 import sqlite3
 from datetime import datetime
@@ -10,45 +9,41 @@ from pathlib import Path
 
 import requests
 
+from utils_python.config_loader import load_config
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 
-_local_cfg  = Path(__file__).parent / "db-sbot-config.json"
-_user_cfg   = Path.home() / ".config" / "db-sbot" / "db-sbot-config.json"
-_cfg_path   = next((p for p in (_local_cfg, _user_cfg) if p.exists()), None)
+_CFG_DEFAULTS = {
+    "USER_TOKEN":                "your-discord-user-token-here",
+    "SERVER_ID":                 "your-server-id-here",
+    "LOGGING_ENABLED":           True,
+    "DETECT_NEW_CHANNELS":       True,
+    "DETECT_REMOVED_CHANNELS":   True,
+    "EMAIL_ENABLED":             False,
+    "GMAIL_ADDRESS":             "your-gmail@gmail.com",
+    "GMAIL_APP_PASSWORD":        "your-gmail-app-password",
+    "EMAIL_RECIPIENTS":          [],
+    "DISCORD_WEBHOOK_ENABLED":   False,
+    "DISCORD_WEBHOOK_URL":       "your-discord-webhook-url-here",
+}
 
-if _cfg_path is None:
-    _user_cfg.parent.mkdir(parents=True, exist_ok=True)
-    _placeholder = {
-        "USER_TOKEN":                "your-discord-user-token-here",
-        "SERVER_ID":                 "your-server-id-here",
-        "LOGGING_ENABLED":           True,
-        "DETECT_NEW_CHANNELS":       True,
-        "DETECT_REMOVED_CHANNELS":   True,
-        "EMAIL_ENABLED":             False,
-        "GMAIL_ADDRESS":             "your-gmail@gmail.com",
-        "GMAIL_APP_PASSWORD":        "your-gmail-app-password",
-        "EMAIL_RECIPIENTS":          [],
-        "DISCORD_WEBHOOK_ENABLED":   False,
-        "DISCORD_WEBHOOK_URL":       "your-discord-webhook-url-here",
-    }
-    with open(_user_cfg, "w", encoding="utf-8") as _f:
-        json.dump(_placeholder, _f, indent=4)
-    print(f"⚙️  No config file found. A placeholder has been created at:\n   {_user_cfg}\nPlease fill it in and restart the script.")
-    raise SystemExit(1)
+_cfg = load_config(
+    app_name="db-sbot",
+    config_filename="db-sbot-config.json",
+    defaults=_CFG_DEFAULTS,
+    caller_file=__file__,
+)
 
-with open(_cfg_path, encoding="utf-8") as _f:
-    _cfg = json.load(_f)
-
-USER_TOKEN         = _cfg["USER_TOKEN"]
-SERVER_ID          = _cfg["SERVER_ID"]
+USER_TOKEN               = _cfg["USER_TOKEN"]
+SERVER_ID                = _cfg["SERVER_ID"]
 LOGGING_ENABLED          = _cfg.get("LOGGING_ENABLED", True)
 DETECT_NEW_CHANNELS      = _cfg.get("DETECT_NEW_CHANNELS", True)
 DETECT_REMOVED_CHANNELS  = _cfg.get("DETECT_REMOVED_CHANNELS", True)
 
 # Email notification settings
-EMAIL_ENABLED      = _cfg.get("EMAIL_ENABLED", True)
+EMAIL_ENABLED      = _cfg.get("EMAIL_ENABLED", False)
 GMAIL_ADDRESS      = _cfg.get("GMAIL_ADDRESS", "")
 GMAIL_APP_PASSWORD = _cfg.get("GMAIL_APP_PASSWORD", "")
 EMAIL_RECIPIENTS   = _cfg.get("EMAIL_RECIPIENTS", [])
