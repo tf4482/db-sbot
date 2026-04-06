@@ -1,4 +1,4 @@
-# 🤖 db-sbot — Discord Channel Monitor
+# 🤖 db-sbot - Discord Channel Monitor
 
 A lightweight, **single-shot** Python script that detects when channels are **created** or **deleted** on a Discord server and sends notifications via **e-mail** and/or a **Discord webhook**.
 
@@ -13,9 +13,9 @@ Run it on a schedule (e.g. via `cron` or a systemd timer) instead of keeping a l
 - 📧 Sends **e-mail** notifications via Gmail
 - 🔔 Sends **Discord webhook** embed notifications (optionally pings a role)
 - 📝 Writes events to a **log file**
-- ⚙️ Self-bootstrapping — creates a placeholder config on first run
+- ⚙️ Self-bootstrapping - creates a placeholder config on first run
 - 💾 Persists state between runs in a local **SQLite** database
-- 🐛 **Debug mode** — separate config file and database for testing
+- 🐛 **Debug mode** - separate config file and database for testing
 
 ---
 
@@ -64,7 +64,7 @@ On the very **first run**, if no config file is found the script will:
 
 Fill in the config file (see [Configuration](#%EF%B8%8F-configuration) below), then run the script again.
 
-The **second run** (with a valid config) seeds the database with the current channel list and exits — no notifications are sent yet.
+The **second run** (with a valid config) seeds the database with the current channel list and exits - no notifications are sent yet.
 
 From the **third run onwards** the script compares the current channel list with the stored snapshot, sends notifications for any changes, updates the snapshot, and exits.
 
@@ -74,8 +74,8 @@ From the **third run onwards** the script compares the current channel list with
 
 The script looks for the config file in this order:
 
-1. 📁 **Script folder** — `db-sbot-config.json` next to `main.py`
-2. 🏠 **User config dir** — `~/.config/db-sbot/db-sbot-config.json`
+1. 📁 **Script folder** - `db-sbot-config.json` next to `main.py`
+2. 🏠 **User config dir** - `~/.config/db-sbot/db-sbot-config.json`
 
 The file is plain **JSON**. All keys and their defaults:
 
@@ -126,7 +126,7 @@ If the debug config is missing it is auto-created as a placeholder at `~/.config
 3. Press **F5** to reload the page
 4. In the filter bar type `science`
 5. Click the request → go to **Request Headers**
-6. Copy the value of the `Authorization` header — that is your user token
+6. Copy the value of the `Authorization` header - that is your user token
 
 ### 🪪 How to get your Discord Server ID
 
@@ -182,7 +182,7 @@ If you're using `uv`:
 
 systemd timers are the modern alternative to cron. You need **two files**: a `.service` unit that runs the script once and a `.timer` unit that triggers it on a schedule.
 
-### 1 — Create the service unit
+### 1 - Create the service unit
 
 ```bash
 mkdir -p ~/.config/systemd/user
@@ -193,7 +193,7 @@ Paste the following (adjust the paths to match your setup):
 
 ```ini
 [Unit]
-Description=db-sbot — Discord channel monitor (single run)
+Description=db-sbot - Discord channel monitor (single run)
 After=network-online.target
 Wants=network-online.target
 
@@ -206,7 +206,7 @@ StandardOutput=append:%h/.db-sbot/systemd.log
 StandardError=append:%h/.db-sbot/systemd.log
 ```
 
-### 2 — Create the timer unit
+### 2 - Create the timer unit
 
 ```bash
 nano ~/.config/systemd/user/db-sbot.timer
@@ -227,14 +227,14 @@ WantedBy=timers.target
 
 > 🕐 Change `OnUnitActiveSec` to any interval you like, e.g. `10min`, `1h`, `30s`.
 
-### 3 — Enable and start the timer
+### 3 - Enable and start the timer
 
 ```bash
 systemctl --user daemon-reload
 systemctl --user enable --now db-sbot.timer
 ```
 
-### 4 — Useful commands
+### 4 - Useful commands
 
 ```bash
 # Check timer status and next trigger time
@@ -284,7 +284,7 @@ db-sbot
 |------|---------|
 | `~/.config/db-sbot/db-sbot-config.json` | Config file (auto-created on first run) |
 | `~/.config/db-sbot/db-sbot-config.debug.json` | Debug config file (auto-created on first `--debug` run) |
-| `~/.db-sbot/state.db` | SQLite database — stores the last known channel list |
+| `~/.db-sbot/state.db` | SQLite database - stores the last known channel list |
 | `~/.db-sbot/state.debug.db` | SQLite database for debug mode |
 | `~/.db-sbot/channel_log.txt` | Event log (new / deleted channels with timestamps) |
 | `~/.db-sbot/channel_log.debug.txt` | Event log for debug mode |
