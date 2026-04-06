@@ -3,7 +3,7 @@
 import argparse
 import smtplib
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
@@ -173,7 +173,7 @@ def send_discord_webhook(title: str, description: str, color: int, role_id: str 
                 "title": title,
                 "description": description,
                 "color": color,
-                "timestamp": datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             }
         ]
     }
