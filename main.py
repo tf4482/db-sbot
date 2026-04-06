@@ -27,6 +27,7 @@ _CFG_DEFAULTS = {
     "EMAIL_RECIPIENTS":          [],
     "DISCORD_WEBHOOK_ENABLED":   False,
     "DISCORD_WEBHOOK_URL":       "your-discord-webhook-url-here",
+    "DISCORD_WEBHOOK_ROLE_ID":   "",
 }
 
 _cfg = load_config(
@@ -51,6 +52,7 @@ EMAIL_RECIPIENTS   = _cfg.get("EMAIL_RECIPIENTS", [])
 # Discord webhook notification settings
 DISCORD_WEBHOOK_ENABLED = _cfg.get("DISCORD_WEBHOOK_ENABLED", False)
 DISCORD_WEBHOOK_URL     = _cfg.get("DISCORD_WEBHOOK_URL", "")
+DISCORD_WEBHOOK_ROLE_ID = _cfg.get("DISCORD_WEBHOOK_ROLE_ID", "")
 
 # ---------------------------------------------------------------------------
 # Persistent state — SQLite in ~/.db-sbot/
@@ -143,9 +145,13 @@ def send_email(subject: str, body: str, recipients: list[str]) -> None:
         print(f"Error sending email: {e}")
 
 
-def send_discord_webhook(title: str, description: str, color: int) -> None:
-    """Sends a Discord embed notification via a configured webhook URL."""
-    payload = {
+def send_discord_webhook(title: str, description: str, color: int, role_id: str = "") -> None:
+    """Sends a Discord embed notification via a configured webhook URL.
+
+    If *role_id* is provided the message content will contain a role mention
+    so that members with that role receive a ping.
+    """
+    payload: dict = {
         "embeds": [
             {
                 "title": title,
@@ -155,6 +161,8 @@ def send_discord_webhook(title: str, description: str, color: int) -> None:
             }
         ]
     }
+    if role_id:
+        payload["content"] = f"<@&{role_id}>"
     try:
         response = requests.post(DISCORD_WEBHOOK_URL, json=payload)
         if response.status_code in (200, 204):
@@ -170,7 +178,7 @@ def notify(subject: str, body: str, title: str, color: int) -> None:
     if EMAIL_ENABLED and EMAIL_RECIPIENTS:
         send_email(subject=subject, body=body, recipients=EMAIL_RECIPIENTS)
     if DISCORD_WEBHOOK_ENABLED and DISCORD_WEBHOOK_URL:
-        send_discord_webhook(title=title, description=body, color=color)
+        send_discord_webhook(title=title, description=body, color=color, role_id=DISCORD_WEBHOOK_ROLE_ID)
 
 # ---------------------------------------------------------------------------
 # Logging
