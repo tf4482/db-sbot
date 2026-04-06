@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import argparse
 import smtplib
 import sqlite3
 from datetime import datetime
@@ -10,6 +11,19 @@ from pathlib import Path
 import requests
 
 from utils_python.config_loader import load_config
+
+# ---------------------------------------------------------------------------
+# CLI arguments — parsed first so DEBUG is available for everything below
+# ---------------------------------------------------------------------------
+
+_parser = argparse.ArgumentParser(description="Discord server channel monitor bot")
+_parser.add_argument(
+    "-d", "--debug",
+    action="store_true",
+    help="Run in debug mode (uses a separate config file and database)",
+)
+_args = _parser.parse_args()
+DEBUG: bool = _args.debug
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -27,11 +41,14 @@ _CFG_DEFAULTS = {
     "EMAIL_RECIPIENTS":          [],
     "DISCORD_WEBHOOK_ENABLED":   False,
     "DISCORD_WEBHOOK_URL":       "your-discord-webhook-url-here",
+    "DISCORD_WEBHOOK_ROLE_ID":   "",
 }
+
+_config_filename = "db-sbot-config.debug.json" if DEBUG else "db-sbot-config.json"
 
 _cfg = load_config(
     app_name="db-sbot",
-    config_filename="db-sbot-config.json",
+    config_filename=_config_filename,
     defaults=_CFG_DEFAULTS,
     caller_file=__file__,
 )
@@ -51,6 +68,7 @@ EMAIL_RECIPIENTS   = _cfg.get("EMAIL_RECIPIENTS", [])
 # Discord webhook notification settings
 DISCORD_WEBHOOK_ENABLED = _cfg.get("DISCORD_WEBHOOK_ENABLED", False)
 DISCORD_WEBHOOK_URL     = _cfg.get("DISCORD_WEBHOOK_URL", "")
+DISCORD_WEBHOOK_ROLE_ID = _cfg.get("DISCORD_WEBHOOK_ROLE_ID", "")
 
 # ---------------------------------------------------------------------------
 # Persistent state — SQLite in ~/.db-sbot/
@@ -59,8 +77,8 @@ DISCORD_WEBHOOK_URL     = _cfg.get("DISCORD_WEBHOOK_URL", "")
 DATA_DIR = Path.home() / ".db-sbot"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-DB_PATH  = DATA_DIR / "state.db"
-LOG_FILE = DATA_DIR / "channel_log.txt"
+DB_PATH  = DATA_DIR / ("state.debug.db"        if DEBUG else "state.db")
+LOG_FILE = DATA_DIR / ("channel_log.debug.txt" if DEBUG else "channel_log.txt")
 
 HEADERS = {
     "Authorization": USER_TOKEN,
@@ -143,9 +161,13 @@ def send_email(subject: str, body: str, recipients: list[str]) -> None:
         print(f"Error sending email: {e}")
 
 
-def send_discord_webhook(title: str, description: str, color: int) -> None:
-    """Sends a Discord embed notification via a configured webhook URL."""
-    payload = {
+def send_discord_webhook(title: str, description: str, color: int, role_id: str = "") -> None:
+    """Sends a Discord embed notification via a configured webhook URL.
+
+    If *role_id* is provided the message content will contain a role mention
+    so that members with that role receive a ping.
+    """
+    payload: dict = {
         "embeds": [
             {
                 "title": title,
@@ -155,6 +177,8 @@ def send_discord_webhook(title: str, description: str, color: int) -> None:
             }
         ]
     }
+    if role_id:
+        payload["content"] = f"<@&{role_id}>"
     try:
         response = requests.post(DISCORD_WEBHOOK_URL, json=payload)
         if response.status_code in (200, 204):
@@ -170,7 +194,7 @@ def notify(subject: str, body: str, title: str, color: int) -> None:
     if EMAIL_ENABLED and EMAIL_RECIPIENTS:
         send_email(subject=subject, body=body, recipients=EMAIL_RECIPIENTS)
     if DISCORD_WEBHOOK_ENABLED and DISCORD_WEBHOOK_URL:
-        send_discord_webhook(title=title, description=body, color=color)
+        send_discord_webhook(title=title, description=body, color=color, role_id=DISCORD_WEBHOOK_ROLE_ID)
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -188,6 +212,14 @@ def log_event(event: str, channel_name: str, channel_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    if DEBUG:
+        print(
+            "⚠️  DEBUG MODE\n"
+            f"   Config : {_config_filename}\n"
+            f"   DB     : {DB_PATH}\n"
+            f"   Log    : {LOG_FILE}\n"
+        )
+
     server_name = get_server_name()
     print(f"🔍 Checking server: {server_name}")
 
