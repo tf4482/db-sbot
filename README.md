@@ -1,6 +1,6 @@
 # 🤖 db-sbot - Discord Channel Monitor
 
-A lightweight, **single-shot** Python script that detects when channels are **created** or **deleted** on a Discord server and sends notifications via **e-mail** and/or a **Discord webhook**.
+A lightweight, **single-shot** Python script that detects when channels are **created**, **deleted**, or **renamed** on a Discord server and sends notifications via **e-mail** and/or a **Discord webhook**.
 
 Run it on a schedule (e.g. via `cron` or a systemd timer) instead of keeping a long-running process alive.
 
@@ -10,6 +10,7 @@ Run it on a schedule (e.g. via `cron` or a systemd timer) instead of keeping a l
 
 - 🆕 Detects **new** channels
 - 🗑️ Detects **deleted** channels
+- ✏️ Detects **renamed** channels (same ID, different name)
 - 📧 Sends **e-mail** notifications via Gmail
 - 🔔 Sends **Discord webhook** embed notifications (optionally pings a role)
 - 📝 Writes events to a **log file**
@@ -86,9 +87,10 @@ The file is plain **JSON**. All keys and their defaults:
     "SERVER_ID":  "your-server-id-here",
 
     // 📋 Detection
-    "LOGGING_ENABLED":         true,   // write events to ~/.db-sbot/channel_log.txt
-    "DETECT_NEW_CHANNELS":     true,   // notify when a channel is created
-    "DETECT_REMOVED_CHANNELS": true,   // notify when a channel is deleted
+    "LOGGING_ENABLED":          true,   // write events to ~/.db-sbot/channel_log.txt
+    "DETECT_NEW_CHANNELS":      true,   // notify when a channel is created
+    "DETECT_REMOVED_CHANNELS":  true,   // notify when a channel is deleted
+    "DETECT_RENAMED_CHANNELS":  true,   // notify when an existing channel is renamed
 
     // 📧 Gmail notifications
     "EMAIL_ENABLED":      false,
@@ -286,7 +288,7 @@ db-sbot
 | `~/.config/db-sbot/db-sbot-config.debug.json` | Debug config file (auto-created on first `--debug` run) |
 | `~/.db-sbot/state.db` | SQLite database - stores the last known channel list |
 | `~/.db-sbot/state.debug.db` | SQLite database for debug mode |
-| `~/.db-sbot/channel_log.txt` | Event log (new / deleted channels with timestamps) |
+| `~/.db-sbot/channel_log.txt` | Event log (new / deleted / renamed channels with timestamps) |
 | `~/.db-sbot/channel_log.debug.txt` | Event log for debug mode |
 
 ---
