@@ -35,6 +35,7 @@ _CFG_DEFAULTS = {
     "LOGGING_ENABLED":           True,
     "DETECT_NEW_CHANNELS":       True,
     "DETECT_REMOVED_CHANNELS":   True,
+    "DETECT_RENAMED_CHANNELS":   True,
     "EMAIL_ENABLED":             False,
     "GMAIL_ADDRESS":             "your-gmail@gmail.com",
     "GMAIL_APP_PASSWORD":        "your-gmail-app-password",
@@ -58,6 +59,7 @@ SERVER_ID                = _cfg["SERVER_ID"]
 LOGGING_ENABLED          = _cfg.get("LOGGING_ENABLED", True)
 DETECT_NEW_CHANNELS      = _cfg.get("DETECT_NEW_CHANNELS", True)
 DETECT_REMOVED_CHANNELS  = _cfg.get("DETECT_REMOVED_CHANNELS", True)
+DETECT_RENAMED_CHANNELS  = _cfg.get("DETECT_RENAMED_CHANNELS", True)
 
 # Email notification settings
 EMAIL_ENABLED      = _cfg.get("EMAIL_ENABLED", False)
@@ -200,10 +202,17 @@ def notify(subject: str, body: str, title: str, color: int) -> None:
 # Logging
 # ---------------------------------------------------------------------------
 
-def log_event(event: str, channel_name: str, channel_id: str) -> None:
-    """Appends a channel event to the log file."""
+def log_event(event: str, channel_name: str, channel_id: str, old_name: str = "") -> None:
+    """Appends a channel event to the log file.
+
+    For rename events *old_name* contains the previous channel name so the log
+    entry shows ``#old_name -> #new_name``.
+    """
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    line = f"[{timestamp}] {event}: #{channel_name} (ID: {channel_id})\n"
+    if old_name:
+        line = f"[{timestamp}] {event}: #{old_name} -> #{channel_name} (ID: {channel_id})\n"
+    else:
+        line = f"[{timestamp}] {event}: #{channel_name} (ID: {channel_id})\n"
     with open(LOG_FILE, "a", encoding="utf-8") as f:
         f.write(line)
 
@@ -268,6 +277,27 @@ def main() -> None:
                         title=f"🗑️ Channel deleted: #{ch_name}",
                         color=0xED4245,  # red
                     )
+
+        # Detect renamed channels (same ID, different name)
+        if DETECT_RENAMED_CHANNELS:
+            for ch_id, new_name in current_channels.items():
+                if ch_id in known_channels:
+                    old_name = known_channels[ch_id]
+                    if old_name != new_name:
+                        print(f"✏️ Channel renamed: #{old_name} -> #{new_name}")
+                        if LOGGING_ENABLED:
+                            log_event("CHANNEL RENAMED", new_name, ch_id, old_name=old_name)
+                        notify(
+                            subject=f"Discord channel renamed: #{old_name} -> #{new_name}",
+                            body=(
+                                f"A channel was renamed on the server.\n\n"
+                                f"Old name: #{old_name}\n"
+                                f"New name: #{new_name}\n"
+                                f"ID: {ch_id}"
+                            ),
+                            title=f"✏️ Channel renamed: #{old_name} → #{new_name}",
+                            color=0xFEE75C,  # yellow
+                        )
 
         # Persist the latest snapshot
         save_channels(conn, current_channels)
