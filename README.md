@@ -124,6 +124,7 @@ Notes:
 - Username matching is **exact and case-sensitive**.
 - `WATCH_POST_MESSAGE_LIMIT` must be between `1` and `100` (Discord API limit).
 - `WATCH_USER_POST_DETECTION_LIMIT` limits how many matched posts trigger notifications per tracked channel in total (persisted in SQLite).
+- If a tracked channel is detected as **renamed**, both its matched-post counter and message cursor are reset (`count=0`) and rebased to the current latest message ID, so only posts made **after** the rename are considered until the cap is reached or the channel is renamed again.
 - The watch state is persisted in the same SQLite database under an internal `watched_channels` table.
 
 ### 🐛 Debug mode configuration
