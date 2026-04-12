@@ -169,7 +169,11 @@ def upsert_watched_channel(
     channel_name: str,
     reason: str,
 ) -> None:
-    """Insert or refresh a watched channel while preserving last_message_id."""
+    """Insert or refresh a watched channel.
+
+    - On first insert, counters/cursor start at zero/NULL.
+    - On rename refresh, cursor is preserved but detection counter is reset.
+    """
     conn.execute(
         """
         INSERT INTO watched_channels (
@@ -179,7 +183,11 @@ def upsert_watched_channel(
         ON CONFLICT(channel_id) DO UPDATE SET
             channel_name = excluded.channel_name,
             reason       = excluded.reason,
-            added_at     = excluded.added_at
+            added_at     = excluded.added_at,
+            detected_posts_count = CASE
+                WHEN excluded.reason = 'renamed' THEN 0
+                ELSE watched_channels.detected_posts_count
+            END
         """,
         (channel_id, channel_name, reason, datetime.now(timezone.utc).isoformat()),
     )
@@ -211,6 +219,24 @@ def update_watched_state(
         WHERE channel_id = ?
         """,
         (last_message_id, detected_posts_count, channel_id),
+    )
+    conn.commit()
+
+
+def reset_watched_channel_tracking(
+    conn: sqlite3.Connection,
+    channel_id: str,
+    last_message_id: str | None,
+) -> None:
+    """Reset per-channel detection counter and set a fresh cursor baseline."""
+    conn.execute(
+        """
+        UPDATE watched_channels
+        SET detected_posts_count = 0,
+            last_message_id = ?
+        WHERE channel_id = ?
+        """,
+        (last_message_id, channel_id),
     )
     conn.commit()
 
@@ -401,6 +427,15 @@ def main() -> None:
                         if LOGGING_ENABLED:
                             log_event("CHANNEL RENAMED", new_name, ch_id, old_name=old_name)
                         upsert_watched_channel(conn, ch_id, new_name, reason="renamed")
+
+                        # On rename, start fresh from "now":
+                        # keep history out of the new detection window.
+                        latest_message_id: str | None = None
+                        latest_messages = get_channel_messages(channel_id=ch_id, limit=1)
+                        if latest_messages:
+                            latest_message_id = latest_messages[0].get("id")
+                        reset_watched_channel_tracking(conn, ch_id, latest_message_id)
+
                         notify(
                             subject=f"Discord channel renamed: #{old_name} -> #{new_name}",
                             body=(
