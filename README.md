@@ -95,6 +95,7 @@ The file is plain **JSON**. All keys and their defaults:
     "DETECT_USER_POSTS":        false,  // monitor watched channels for posts by WATCH_USERNAME
     "WATCH_USERNAME":           "",     // Discord username to match exactly (case-sensitive)
     "WATCH_POST_MESSAGE_LIMIT": 50,     // messages fetched per watched channel per run (1..100)
+    "WATCH_USER_POST_DETECTION_LIMIT": 20, // max matched posts notified per tracked channel in total (>=1)
 
     // 📧 Gmail notifications
     "EMAIL_ENABLED":      false,
@@ -122,6 +123,7 @@ Notes:
 
 - Username matching is **exact and case-sensitive**.
 - `WATCH_POST_MESSAGE_LIMIT` must be between `1` and `100` (Discord API limit).
+- `WATCH_USER_POST_DETECTION_LIMIT` limits how many matched posts trigger notifications per tracked channel in total (persisted in SQLite).
 - The watch state is persisted in the same SQLite database under an internal `watched_channels` table.
 
 ### 🐛 Debug mode configuration
