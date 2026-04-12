@@ -36,6 +36,9 @@ _CFG_DEFAULTS = {
     "DETECT_NEW_CHANNELS":       True,
     "DETECT_REMOVED_CHANNELS":   True,
     "DETECT_RENAMED_CHANNELS":   True,
+    "DETECT_USER_POSTS":         False,
+    "WATCH_USERNAME":            "",
+    "WATCH_POST_MESSAGE_LIMIT":  50,
     "EMAIL_ENABLED":             False,
     "GMAIL_ADDRESS":             "your-gmail@gmail.com",
     "GMAIL_APP_PASSWORD":        "your-gmail-app-password",
@@ -60,6 +63,14 @@ LOGGING_ENABLED          = _cfg.get("LOGGING_ENABLED", True)
 DETECT_NEW_CHANNELS      = _cfg.get("DETECT_NEW_CHANNELS", True)
 DETECT_REMOVED_CHANNELS  = _cfg.get("DETECT_REMOVED_CHANNELS", True)
 DETECT_RENAMED_CHANNELS  = _cfg.get("DETECT_RENAMED_CHANNELS", True)
+DETECT_USER_POSTS        = _cfg.get("DETECT_USER_POSTS", False)
+WATCH_USERNAME           = _cfg.get("WATCH_USERNAME", "").strip()
+
+_watch_limit_raw = _cfg.get("WATCH_POST_MESSAGE_LIMIT", 50)
+try:
+    WATCH_POST_MESSAGE_LIMIT = max(1, min(100, int(_watch_limit_raw)))
+except (TypeError, ValueError):
+    WATCH_POST_MESSAGE_LIMIT = 50
 
 # Email notification settings
 EMAIL_ENABLED      = _cfg.get("EMAIL_ENABLED", False)
@@ -101,6 +112,17 @@ def init_db(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS watched_channels (
+            channel_id      TEXT PRIMARY KEY,
+            channel_name    TEXT NOT NULL,
+            reason          TEXT NOT NULL,
+            added_at        TEXT NOT NULL,
+            last_message_id TEXT
+        )
+        """
+    )
     conn.commit()
 
 
@@ -116,6 +138,55 @@ def save_channels(conn: sqlite3.Connection, channels: dict[str, str]) -> None:
     conn.executemany(
         "INSERT INTO channels (id, name) VALUES (?, ?)",
         channels.items(),
+    )
+    conn.commit()
+
+
+def upsert_watched_channel(
+    conn: sqlite3.Connection,
+    channel_id: str,
+    channel_name: str,
+    reason: str,
+) -> None:
+    """Insert or refresh a watched channel while preserving last_message_id."""
+    conn.execute(
+        """
+        INSERT INTO watched_channels (channel_id, channel_name, reason, added_at, last_message_id)
+        VALUES (?, ?, ?, ?, NULL)
+        ON CONFLICT(channel_id) DO UPDATE SET
+            channel_name = excluded.channel_name,
+            reason       = excluded.reason,
+            added_at     = excluded.added_at
+        """,
+        (channel_id, channel_name, reason, datetime.now(timezone.utc).isoformat()),
+    )
+    conn.commit()
+
+
+def load_watched_channels(conn: sqlite3.Connection) -> list[tuple[str, str, str, str | None]]:
+    """Returns watched channels as (channel_id, channel_name, reason, last_message_id)."""
+    rows = conn.execute(
+        """
+        SELECT channel_id, channel_name, reason, last_message_id
+        FROM watched_channels
+        """
+    ).fetchall()
+    return [(row[0], row[1], row[2], row[3]) for row in rows]
+
+
+def update_watched_last_message_id(
+    conn: sqlite3.Connection,
+    channel_id: str,
+    last_message_id: str,
+) -> None:
+    """Stores the newest processed message id for a watched channel."""
+    conn.execute(
+        """
+        UPDATE watched_channels
+        SET last_message_id = ?
+        WHERE channel_id = ?
+        """,
+        (last_message_id, channel_id),
     )
     conn.commit()
 
@@ -140,6 +211,23 @@ def get_channels() -> dict[str, str] | None:
     if response.status_code == 200:
         return {ch["id"]: ch["name"] for ch in response.json()}
     print(f"Error: {response.status_code}")
+    return None
+
+
+def get_channel_messages(channel_id: str, after: str | None = None, limit: int = 50) -> list[dict] | None:
+    """Fetches recent messages from one channel.
+
+    If *after* is given, only messages newer than that message ID are returned.
+    """
+    url = f"https://discord.com/api/v10/channels/{channel_id}/messages"
+    params: dict[str, str | int] = {"limit": max(1, min(100, limit))}
+    if after:
+        params["after"] = after
+
+    response = requests.get(url, headers=HEADERS, params=params)
+    if response.status_code == 200:
+        return response.json()
+    print(f"Error fetching messages for channel {channel_id}: {response.status_code}")
     return None
 
 # ---------------------------------------------------------------------------
@@ -257,6 +345,7 @@ def main() -> None:
                     print(f"🆕 New channel: #{ch_name}")
                     if LOGGING_ENABLED:
                         log_event("NEW CHANNEL", ch_name, ch_id)
+                    upsert_watched_channel(conn, ch_id, ch_name, reason="new")
                     notify(
                         subject=f"New Discord channel detected: #{ch_name}",
                         body=f"A new channel was created on the server.\n\nName: #{ch_name}\nID: {ch_id}",
@@ -287,6 +376,7 @@ def main() -> None:
                         print(f"✏️ Channel renamed: #{old_name} -> #{new_name}")
                         if LOGGING_ENABLED:
                             log_event("CHANNEL RENAMED", new_name, ch_id, old_name=old_name)
+                        upsert_watched_channel(conn, ch_id, new_name, reason="renamed")
                         notify(
                             subject=f"Discord channel renamed: #{old_name} -> #{new_name}",
                             body=(
@@ -298,6 +388,61 @@ def main() -> None:
                             title=f"✏️ Channel renamed: #{old_name} → #{new_name}",
                             color=0xFEE75C,  # yellow
                         )
+
+        # Detect posts by watched username in channels previously marked as new/renamed
+        if DETECT_USER_POSTS and WATCH_USERNAME:
+            watched_channels = load_watched_channels(conn)
+            for ch_id, watched_name, reason, last_message_id in watched_channels:
+                if ch_id not in current_channels:
+                    # Channel no longer exists or is not accessible right now.
+                    continue
+
+                ch_name = current_channels.get(ch_id, watched_name)
+                messages = get_channel_messages(
+                    channel_id=ch_id,
+                    after=last_message_id,
+                    limit=WATCH_POST_MESSAGE_LIMIT,
+                )
+                if messages is None or not messages:
+                    continue
+
+                sorted_messages = sorted(messages, key=lambda msg: int(msg.get("id", 0)))
+                newest_message_id = sorted_messages[-1].get("id")
+
+                for msg in sorted_messages:
+                    author = msg.get("author") or {}
+                    username = author.get("username", "")
+                    if username != WATCH_USERNAME:
+                        continue
+
+                    message_id = msg.get("id", "")
+                    content = (msg.get("content") or "").strip() or "[no text content]"
+                    if len(content) > 300:
+                        content = content[:297] + "..."
+
+                    timestamp = msg.get("timestamp", "unknown")
+                    message_url = f"https://discord.com/channels/{SERVER_ID}/{ch_id}/{message_id}"
+
+                    print(f"👤 Watched user post: @{WATCH_USERNAME} in #{ch_name}")
+                    if LOGGING_ENABLED:
+                        log_event(f"USER POST by @{WATCH_USERNAME}", ch_name, ch_id)
+                    notify(
+                        subject=f"Post by @{WATCH_USERNAME} in #{ch_name}",
+                        body=(
+                            f"A watched user posted in a tracked channel.\n\n"
+                            f"User: @{WATCH_USERNAME}\n"
+                            f"Channel: #{ch_name}\n"
+                            f"Tracked because: {reason}\n"
+                            f"Time: {timestamp}\n"
+                            f"Message: {content}\n"
+                            f"Link: {message_url}"
+                        ),
+                        title=f"👤 Post by @{WATCH_USERNAME} in #{ch_name}",
+                        color=0x5865F2,  # Discord blurple
+                    )
+
+                if newest_message_id:
+                    update_watched_last_message_id(conn, ch_id, newest_message_id)
 
         # Persist the latest snapshot
         save_channels(conn, current_channels)
