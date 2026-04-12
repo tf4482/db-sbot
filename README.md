@@ -11,6 +11,7 @@ Run it on a schedule (e.g. via `cron` or a systemd timer) instead of keeping a l
 - 🆕 Detects **new** channels
 - 🗑️ Detects **deleted** channels
 - ✏️ Detects **renamed** channels (same ID, different name)
+- 👤 Detects posts by a configured username in channels that were previously detected as **new** or **renamed**
 - 📧 Sends **e-mail** notifications via Gmail
 - 🔔 Sends **Discord webhook** embed notifications (optionally pings a role)
 - 📝 Writes events to a **log file**
@@ -91,6 +92,10 @@ The file is plain **JSON**. All keys and their defaults:
     "DETECT_NEW_CHANNELS":      true,   // notify when a channel is created
     "DETECT_REMOVED_CHANNELS":  true,   // notify when a channel is deleted
     "DETECT_RENAMED_CHANNELS":  true,   // notify when an existing channel is renamed
+    "DETECT_USER_POSTS":        false,  // monitor watched channels for posts by WATCH_USERNAME
+    "WATCH_USERNAME":           "",     // Discord username to match exactly (case-sensitive)
+    "WATCH_POST_MESSAGE_LIMIT": 50,     // messages fetched per watched channel per run (1..100)
+    "WATCH_USER_POST_DETECTION_LIMIT": 20, // max matched posts notified per tracked channel in total (>=1)
 
     // 📧 Gmail notifications
     "EMAIL_ENABLED":      false,
@@ -104,6 +109,22 @@ The file is plain **JSON**. All keys and their defaults:
     "DISCORD_WEBHOOK_ROLE_ID": ""      // optional: role ID to ping (leave empty to disable)
 }
 ```
+
+### 👤 Watched user post detection
+
+When `DETECT_USER_POSTS` is enabled and `WATCH_USERNAME` is set, the script also checks channels that were previously detected as:
+
+- **new** (`DETECT_NEW_CHANNELS`), or
+- **renamed** (`DETECT_RENAMED_CHANNELS`)
+
+If a message by `WATCH_USERNAME` appears in one of those tracked channels, the script sends the same notification outputs (e-mail / webhook) including channel, timestamp, content preview, and a direct message URL.
+
+Notes:
+
+- Username matching is **exact and case-sensitive**.
+- `WATCH_POST_MESSAGE_LIMIT` must be between `1` and `100` (Discord API limit).
+- `WATCH_USER_POST_DETECTION_LIMIT` limits how many matched posts trigger notifications per tracked channel in total (persisted in SQLite).
+- The watch state is persisted in the same SQLite database under an internal `watched_channels` table.
 
 ### 🐛 Debug mode configuration
 
