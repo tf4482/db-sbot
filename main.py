@@ -39,6 +39,7 @@ _CFG_DEFAULTS = {
     "DETECT_USER_POSTS":         False,
     "WATCH_USERNAME":            "",
     "WATCH_POST_MESSAGE_LIMIT":  50,
+    "WATCH_USER_POST_DETECTION_LIMIT": 20,
     "EMAIL_ENABLED":             False,
     "GMAIL_ADDRESS":             "your-gmail@gmail.com",
     "GMAIL_APP_PASSWORD":        "your-gmail-app-password",
@@ -71,6 +72,12 @@ try:
     WATCH_POST_MESSAGE_LIMIT = max(1, min(100, int(_watch_limit_raw)))
 except (TypeError, ValueError):
     WATCH_POST_MESSAGE_LIMIT = 50
+
+_watch_detection_limit_raw = _cfg.get("WATCH_USER_POST_DETECTION_LIMIT", 20)
+try:
+    WATCH_USER_POST_DETECTION_LIMIT = max(1, int(_watch_detection_limit_raw))
+except (TypeError, ValueError):
+    WATCH_USER_POST_DETECTION_LIMIT = 20
 
 # Email notification settings
 EMAIL_ENABLED      = _cfg.get("EMAIL_ENABLED", False)
@@ -119,10 +126,24 @@ def init_db(conn: sqlite3.Connection) -> None:
             channel_name    TEXT NOT NULL,
             reason          TEXT NOT NULL,
             added_at        TEXT NOT NULL,
-            last_message_id TEXT
+            last_message_id TEXT,
+            detected_posts_count INTEGER NOT NULL DEFAULT 0
         )
         """
     )
+
+    # Lightweight migration for existing DBs created before detected_posts_count existed.
+    watched_cols = {
+        row[1] for row in conn.execute("PRAGMA table_info(watched_channels)").fetchall()
+    }
+    if "detected_posts_count" not in watched_cols:
+        conn.execute(
+            """
+            ALTER TABLE watched_channels
+            ADD COLUMN detected_posts_count INTEGER NOT NULL DEFAULT 0
+            """
+        )
+
     conn.commit()
 
 
@@ -151,8 +172,10 @@ def upsert_watched_channel(
     """Insert or refresh a watched channel while preserving last_message_id."""
     conn.execute(
         """
-        INSERT INTO watched_channels (channel_id, channel_name, reason, added_at, last_message_id)
-        VALUES (?, ?, ?, ?, NULL)
+        INSERT INTO watched_channels (
+            channel_id, channel_name, reason, added_at, last_message_id, detected_posts_count
+        )
+        VALUES (?, ?, ?, ?, NULL, 0)
         ON CONFLICT(channel_id) DO UPDATE SET
             channel_name = excluded.channel_name,
             reason       = excluded.reason,
@@ -163,30 +186,31 @@ def upsert_watched_channel(
     conn.commit()
 
 
-def load_watched_channels(conn: sqlite3.Connection) -> list[tuple[str, str, str, str | None]]:
-    """Returns watched channels as (channel_id, channel_name, reason, last_message_id)."""
+def load_watched_channels(conn: sqlite3.Connection) -> list[tuple[str, str, str, str | None, int]]:
+    """Returns watched channels as (channel_id, channel_name, reason, last_message_id, detected_posts_count)."""
     rows = conn.execute(
         """
-        SELECT channel_id, channel_name, reason, last_message_id
+        SELECT channel_id, channel_name, reason, last_message_id, detected_posts_count
         FROM watched_channels
         """
     ).fetchall()
-    return [(row[0], row[1], row[2], row[3]) for row in rows]
+    return [(row[0], row[1], row[2], row[3], int(row[4] or 0)) for row in rows]
 
 
-def update_watched_last_message_id(
+def update_watched_state(
     conn: sqlite3.Connection,
     channel_id: str,
     last_message_id: str,
+    detected_posts_count: int,
 ) -> None:
-    """Stores the newest processed message id for a watched channel."""
+    """Stores newest processed message id and matched-post counter for a watched channel."""
     conn.execute(
         """
         UPDATE watched_channels
-        SET last_message_id = ?
+        SET last_message_id = ?, detected_posts_count = ?
         WHERE channel_id = ?
         """,
-        (last_message_id, channel_id),
+        (last_message_id, detected_posts_count, channel_id),
     )
     conn.commit()
 
@@ -392,57 +416,100 @@ def main() -> None:
         # Detect posts by watched username in channels previously marked as new/renamed
         if DETECT_USER_POSTS and WATCH_USERNAME:
             watched_channels = load_watched_channels(conn)
-            for ch_id, watched_name, reason, last_message_id in watched_channels:
+            for ch_id, watched_name, reason, last_message_id, detected_posts_count in watched_channels:
+                if detected_posts_count >= WATCH_USER_POST_DETECTION_LIMIT:
+                    continue
+
                 if ch_id not in current_channels:
                     # Channel no longer exists or is not accessible right now.
                     continue
 
                 ch_name = current_channels.get(ch_id, watched_name)
-                messages = get_channel_messages(
-                    channel_id=ch_id,
-                    after=last_message_id,
-                    limit=WATCH_POST_MESSAGE_LIMIT,
-                )
-                if messages is None or not messages:
-                    continue
+                cursor_after = last_message_id
+                latest_seen_id = last_message_id
+                channel_detected_count = detected_posts_count
+                channel_cap_reached = False
 
-                sorted_messages = sorted(messages, key=lambda msg: int(msg.get("id", 0)))
-                newest_message_id = sorted_messages[-1].get("id")
-
-                for msg in sorted_messages:
-                    author = msg.get("author") or {}
-                    username = author.get("username", "")
-                    if username != WATCH_USERNAME:
-                        continue
-
-                    message_id = msg.get("id", "")
-                    content = (msg.get("content") or "").strip() or "[no text content]"
-                    if len(content) > 300:
-                        content = content[:297] + "..."
-
-                    timestamp = msg.get("timestamp", "unknown")
-                    message_url = f"https://discord.com/channels/{SERVER_ID}/{ch_id}/{message_id}"
-
-                    print(f"👤 Watched user post: @{WATCH_USERNAME} in #{ch_name}")
-                    if LOGGING_ENABLED:
-                        log_event(f"USER POST by @{WATCH_USERNAME}", ch_name, ch_id)
-                    notify(
-                        subject=f"Post by @{WATCH_USERNAME} in #{ch_name}",
-                        body=(
-                            f"A watched user posted in a tracked channel.\n\n"
-                            f"User: @{WATCH_USERNAME}\n"
-                            f"Channel: #{ch_name}\n"
-                            f"Tracked because: {reason}\n"
-                            f"Time: {timestamp}\n"
-                            f"Message: {content}\n"
-                            f"Link: {message_url}"
-                        ),
-                        title=f"👤 Post by @{WATCH_USERNAME} in #{ch_name}",
-                        color=0x5865F2,  # Discord blurple
+                while True:
+                    messages = get_channel_messages(
+                        channel_id=ch_id,
+                        after=cursor_after,
+                        limit=WATCH_POST_MESSAGE_LIMIT,
                     )
+                    if messages is None or not messages:
+                        break
 
-                if newest_message_id:
-                    update_watched_last_message_id(conn, ch_id, newest_message_id)
+                    sorted_messages = sorted(messages, key=lambda msg: int(msg.get("id", 0)))
+                    newest_message_id = sorted_messages[-1].get("id")
+
+                    for msg in sorted_messages:
+                        author = msg.get("author") or {}
+                        username = author.get("username", "")
+                        message_id = msg.get("id", "")
+
+                        # Keep cursor progression tied to processed messages, even non-matching ones.
+                        if message_id:
+                            latest_seen_id = message_id
+
+                        if username != WATCH_USERNAME:
+                            continue
+
+                        content = (msg.get("content") or "").strip() or "[no text content]"
+                        if len(content) > 300:
+                            content = content[:297] + "..."
+
+                        timestamp = msg.get("timestamp", "unknown")
+                        message_url = f"https://discord.com/channels/{SERVER_ID}/{ch_id}/{message_id}"
+
+                        print(f"👤 Watched user post: @{WATCH_USERNAME} in #{ch_name}")
+                        if LOGGING_ENABLED:
+                            log_event(f"USER POST by @{WATCH_USERNAME}", ch_name, ch_id)
+                        notify(
+                            subject=f"Post by @{WATCH_USERNAME} in #{ch_name}",
+                            body=(
+                                f"A watched user posted in a tracked channel.\n\n"
+                                f"User: @{WATCH_USERNAME}\n"
+                                f"Channel: #{ch_name}\n"
+                                f"Tracked because: {reason}\n"
+                                f"Time: {timestamp}\n"
+                                f"Message: {content}\n"
+                                f"Link: {message_url}"
+                            ),
+                            title=f"👤 Post by @{WATCH_USERNAME} in #{ch_name}",
+                            color=0x5865F2,  # Discord blurple
+                        )
+
+                        channel_detected_count += 1
+                        if channel_detected_count >= WATCH_USER_POST_DETECTION_LIMIT:
+                            channel_cap_reached = True
+                            break
+
+                    if newest_message_id:
+                        latest_seen_id = newest_message_id if not channel_cap_reached else latest_seen_id
+
+                    if channel_cap_reached:
+                        break
+
+                    # Safety to avoid infinite loops when API repeats the same cursor.
+                    if newest_message_id == cursor_after:
+                        break
+                    cursor_after = newest_message_id
+
+                    # Pagination complete.
+                    if len(messages) < WATCH_POST_MESSAGE_LIMIT:
+                        break
+
+                if latest_seen_id and latest_seen_id != last_message_id:
+                    update_watched_state(conn, ch_id, latest_seen_id, channel_detected_count)
+                elif channel_detected_count != detected_posts_count:
+                    # Counter may have changed even if cursor didn't.
+                    update_watched_state(conn, ch_id, last_message_id or "", channel_detected_count)
+
+                if channel_cap_reached:
+                    print(
+                        "ℹ️ Watched user detection cap reached for "
+                        f"#{ch_name} ({WATCH_USER_POST_DETECTION_LIMIT} total matches)."
+                    )
 
         # Persist the latest snapshot
         save_channels(conn, current_channels)
